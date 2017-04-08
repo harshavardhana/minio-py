@@ -45,7 +45,8 @@ import certifi
 # Internal imports
 from . import __title__, __version__
 from .compat import urlsplit, range, urlencode, basestring
-from .error import ResponseError, InvalidArgumentError, InvalidSizeError
+from .error import (KnownResponseError, ResponseError, NoSuchBucket,
+                    InvalidArgumentError, InvalidSizeError, NoSuchBucketPolicy)
 from .definitions import Object, UploadPart
 from .parsers import (parse_list_buckets,
                       parse_list_objects,
@@ -142,7 +143,7 @@ class Minio(object):
         self._trace_output_stream = None
 
         self._conn_timeout = urllib3.Timeout.DEFAULT_TIMEOUT if not timeout \
-            else urllib3.Timeout(timeout)
+                             else urllib3.Timeout(timeout)
 
         self._http = urllib3.PoolManager(
             timeout=self._conn_timeout,
@@ -309,11 +310,10 @@ class Minio(object):
         try:
             self._url_open('HEAD', bucket_name=bucket_name)
         # If the bucket has not been created yet, Minio will return a "NoSuchBucket" error.
+        except NoSuchBucket as e:
+            return False
         except ResponseError as e:
-            if e.code == 'NoSuchBucket':
-                return False
             raise
-
         return True
 
     def remove_bucket(self, bucket_name):
@@ -334,12 +334,10 @@ class Minio(object):
             response = self._url_open("GET",
                                       bucket_name=bucket_name,
                                       query={"policy": ""})
+        except NoSuchBucketPolicy as e:
+            return None
         except ResponseError as e:
-            # Ignore 'NoSuchBucketPolicy' error.
-            if e.code != 'NoSuchBucketPolicy':
-                raise
-            else:
-                return None
+            raise
 
         data = response.data
         if isinstance(data, bytes) and isinstance(data, str):  # Python 2
@@ -1332,7 +1330,7 @@ class Minio(object):
         :return: Presigned url.
         """
         if expires.total_seconds() < 1 or \
-                        expires.total_seconds() > _SEVEN_DAYS_SECONDS:
+           expires.total_seconds() > _SEVEN_DAYS_SECONDS:
             raise InvalidArgumentError('Expires param valid values'
                                        ' are between 1 secs to'
                                        ' {0} secs'.format(_SEVEN_DAYS_SECONDS))
@@ -1620,7 +1618,7 @@ class Minio(object):
                                              upload_id)
 
         # save uploaded parts for verification.
-        uploaded_parts = {part.part_number: part for part in parts_iter}
+        uploaded_parts = { part.part_number: part for part in parts_iter }
 
         # Generate new parts and upload <= current_part_size until
         # part_number reaches total_parts_count calculated for the
@@ -1637,7 +1635,7 @@ class Minio(object):
             # Further verify if we have matching md5sum as well.
             previous_part = uploaded_parts.get(part_number, None)
             if (previous_part and previous_part.size == current_part_size and
-                        previous_part.etag == md5_hex):
+                previous_part.etag == md5_hex):
                 total_uploaded += previous_part.size
                 continue
 
@@ -1861,13 +1859,11 @@ class Minio(object):
             dump_http(method, url, fold_case_headers, response,
                       self._trace_output_stream)
 
-        if response.status != 200 and response.status != 204 and response.status != 206:
+        if response.status != 200 and response.status != 204 \
+           and response.status != 206:
             # Upon any response error invalidate the region cache
             # proactively for the bucket name.
             self._delete_bucket_region(bucket_name)
-
-            # Populate response_error with error response.
-            # response_error = ResponseError(response, method, bucket_name)
 
             # In case we did not preload_content, we need to release
             # the connection:

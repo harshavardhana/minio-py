@@ -54,11 +54,6 @@ class MinioError(Exception):
             message=self.message
         )
 
-class KnownResponseError(MinioError):
-    def __init__(self, response_error, **kwargs):
-        super(KnownResponseError, self).__init__(message=self.message, **kwargs)
-        self.response_error = response_error
-
 class InvalidEndpointError(MinioError):
     """
     InvalidEndpointError is raised when input endpoint URL is invalid.
@@ -119,7 +114,7 @@ class MultiDeleteError(object):
                                     self.error_code,
                                     self.error_message)
 
-from .known_errors import known_errors
+from .known_errors import *
 
 class ResponseError(MinioError):
     """
